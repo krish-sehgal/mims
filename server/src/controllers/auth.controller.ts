@@ -88,3 +88,13 @@ export async function me(req: Request, res: Response, next: NextFunction) {
         next(err)
     }
 }
+
+export function logout(req: Request, res: Response, next: NextFunction) {
+    try {
+        res.clearCookie("accessToken");
+
+        return res.json(new apiResponse(200, "Logout successful"))
+    } catch (err) {
+        next(err)
+    }
+}
