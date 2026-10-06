@@ -78,3 +78,13 @@ export async function login(req: Request, res: Response, next: NextFunction) {
         next(err);
     }
 }
+
+export async function me(req: Request, res: Response, next: NextFunction) {
+    try {
+        const userId = req.userId
+
+        return res.json(new apiResponse(200, "user profile fetched successfully", { userId }))
+    } catch (err) {
+        next(err)
+    }
+}
