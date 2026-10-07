@@ -5,6 +5,8 @@ import cookieParser from "cookie-parser"
 
 import authRouter from "./routers/auth.router.js"
 import productRouter from "./routers/product.router.js"
+import transactionRouter from "./routers/transaction.router.js"
+import unitRouter from "./routers/unit.router.js"
 import apiError from "./utils/apiError.js"
 import errorHandler from "./middlewares/error.middleware.js"
 
@@ -16,6 +18,8 @@ app.use(morgan('dev'))
 
 app.use('/api/v1/auth', authRouter)
 app.use('/api/v1/product', productRouter)
+app.use('/api/v1/transaction', transactionRouter)
+app.use('/api/v1/unit', unitRouter)
 
 app.get('/', (req, res) => {
     res.json({
