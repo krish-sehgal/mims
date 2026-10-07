@@ -4,6 +4,7 @@ import morgan from "morgan"
 import cookieParser from "cookie-parser"
 
 import authRouter from "./routers/auth.router.js"
+import productRouter from "./routers/product.router.js"
 import apiError from "./utils/apiError.js"
 import errorHandler from "./middlewares/error.middleware.js"
 
@@ -14,6 +15,7 @@ app.use(cookieParser())
 app.use(morgan('dev'))
 
 app.use('/api/v1/auth', authRouter)
+app.use('/api/v1/product', productRouter)
 
 app.get('/', (req, res) => {
     res.json({
