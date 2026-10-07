@@ -1,7 +1,29 @@
 import type { Request, Response, NextFunction } from "express";
 import apiError from "../utils/apiError.js";
 import apiResponse from "../utils/apiResponse.js";
-import { findBySkuOrBarcode, unitExists, createProduct as insertProduct, getProducts as findProducts, countProducts, findProductById } from "../services/product.service.js";
+import {
+    findBySkuOrBarcode,
+    unitExists,
+    createProduct as insertProduct,
+    getProducts as findProducts,
+    countProducts,
+    findProductById,
+    findConflictingProduct,
+    updateProduct as updateProductRecord
+} from "../services/product.service.js";
+import type { UpdateProductInput } from "../services/product.service.js";
+
+function assertNonEmptyString(value: unknown, field: string): asserts value is string {
+    if (typeof value !== "string" || value.trim() === "") {
+        throw new apiError(400, `${field} must be a non-empty string`);
+    }
+}
+
+function assertNonNegativeNumber(value: unknown, field: string): asserts value is number {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        throw new apiError(400, `${field} must be a non-negative number`);
+    }
+}
 
 export async function createProduct(req: Request, res: Response, next: NextFunction) {
     try {
@@ -109,6 +131,93 @@ export async function getProduct(req: Request, res: Response, next: NextFunction
 
         return res.json(new apiResponse(200, "product fetched successfully", product));
     } catch (err) {
+        next(err);
+    }
+}
+
+export async function updateProduct(req: Request, res: Response, next: NextFunction) {
+    try {
+        const id = Number(req.params.id);
+
+        if (!Number.isInteger(id) || id < 1) {
+            throw new apiError(400, "invalid product id");
+        }
+
+        const existing = await findProductById(id);
+
+        if (!existing) {
+            throw new apiError(404, "product not found");
+        }
+
+        const { name, sku, barcode, base_unit_id, quantity, min_quantity, image_url, category } = req.body;
+
+        const updates: UpdateProductInput = {};
+
+        if (name !== undefined) {
+            assertNonEmptyString(name, "name");
+            updates.name = name;
+        }
+        if (sku !== undefined) {
+            assertNonEmptyString(sku, "sku");
+            updates.sku = sku;
+        }
+        if (barcode !== undefined) {
+            assertNonEmptyString(barcode, "barcode");
+            updates.barcode = barcode;
+        }
+
+        if (base_unit_id !== undefined) {
+            if (typeof base_unit_id !== "number") {
+                throw new apiError(400, "base_unit_id must be a number");
+            }
+            if (!(await unitExists(base_unit_id))) {
+                throw new apiError(400, "invalid base_unit_id");
+            }
+            updates.base_unit_id = base_unit_id;
+        }
+
+        if (quantity !== undefined) {
+            assertNonNegativeNumber(quantity, "quantity");
+            updates.quantity = quantity;
+        }
+        if (min_quantity !== undefined) {
+            assertNonNegativeNumber(min_quantity, "min_quantity");
+            updates.min_quantity = min_quantity;
+        }
+
+        if (image_url !== undefined) {
+            if (image_url !== null && typeof image_url !== "string") {
+                throw new apiError(400, "image_url must be a string or null");
+            }
+            updates.image_url = image_url;
+        }
+
+        if (category !== undefined) {
+            if (category !== null && typeof category !== "string") {
+                throw new apiError(400, "category must be a string or null");
+            }
+            updates.category = category;
+        }
+
+        if (Object.keys(updates).length === 0) {
+            throw new apiError(400, "no fields to update");
+        }
+
+        const conflict = await findConflictingProduct(updates.sku, updates.barcode, id);
+
+        if (conflict.length > 0) {
+            throw new apiError(409, "a product with this sku or barcode already exists");
+        }
+
+        await updateProductRecord(id, updates);
+
+        const product = await findProductById(id);
+
+        return res.json(new apiResponse(200, "product updated successfully", product));
+    } catch (err: any) {
+        if (err?.code === "ER_DUP_ENTRY") {
+            return next(new apiError(409, "a product with this sku or barcode already exists"));
+        }
         next(err);
     }
 }

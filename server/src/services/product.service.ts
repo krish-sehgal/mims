@@ -52,6 +52,84 @@ export async function findProductById(id: number): Promise<RowDataPacket | undef
     return (rows as RowDataPacket[])[0];
 }
 
+export interface UpdateProductInput {
+    name?: string;
+    sku?: string;
+    barcode?: string;
+    base_unit_id?: number;
+    quantity?: number;
+    min_quantity?: number;
+    image_url?: string | null;
+    category?: string | null;
+}
+
+export async function findConflictingProduct(sku: string | undefined, barcode: string | undefined, excludeId: number): Promise<RowDataPacket[]> {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (sku !== undefined) {
+        conditions.push("sku = ?");
+        params.push(sku);
+    }
+
+    if (barcode !== undefined) {
+        conditions.push("barcode = ?");
+        params.push(barcode);
+    }
+
+    if (conditions.length === 0) {
+        return [];
+    }
+
+    params.push(excludeId);
+
+    const [rows] = await getPool().execute(
+        `SELECT * FROM products WHERE (${conditions.join(" OR ")}) AND id != ?`,
+        params
+    );
+    return rows as RowDataPacket[];
+}
+
+export async function updateProduct(id: number, input: UpdateProductInput) {
+    const connection = await getPool().getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        const fields: string[] = [];
+        const params: (string | number | null)[] = [];
+
+        if (input.name !== undefined) { fields.push("name = ?"); params.push(input.name); }
+        if (input.sku !== undefined) { fields.push("sku = ?"); params.push(input.sku); }
+        if (input.barcode !== undefined) { fields.push("barcode = ?"); params.push(input.barcode); }
+        if (input.base_unit_id !== undefined) { fields.push("base_unit_id = ?"); params.push(input.base_unit_id); }
+        if (input.quantity !== undefined) { fields.push("quantity = ?"); params.push(input.quantity); }
+        if (input.min_quantity !== undefined) { fields.push("min_quantity = ?"); params.push(input.min_quantity); }
+        if (input.image_url !== undefined) { fields.push("image_url = ?"); params.push(input.image_url); }
+        if (input.category !== undefined) { fields.push("category = ?"); params.push(input.category); }
+
+        if (fields.length > 0) {
+            params.push(id);
+            await connection.execute(`UPDATE products SET ${fields.join(", ")} WHERE id = ?`, params);
+        }
+
+        if (input.base_unit_id !== undefined) {
+            await connection.execute(
+                `UPDATE product_units SET unit_id = ?, conversion_to_base = 1
+                 WHERE product_id = ? AND is_base = 1`,
+                [input.base_unit_id, id]
+            );
+        }
+
+        await connection.commit();
+    } catch (err) {
+        await connection.rollback();
+        throw err;
+    } finally {
+        connection.release();
+    }
+}
+
 export async function unitExists(id: number): Promise<boolean> {
     const [rows] = await getPool().execute('SELECT id FROM units WHERE id = ?', [id]);
     return (rows as RowDataPacket[]).length > 0;
