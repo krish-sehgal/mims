@@ -1,13 +1,35 @@
 import type { Request, Response, NextFunction } from "express"
+import type { JwtPayload } from "jsonwebtoken"
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import apiError from "../utils/apiError.js";
 import { findByEmail, createUser, setResetToken, findByResetToken, updatePassword } from "../services/auth.service.js";
 import apiResponse from "../utils/apiResponse.js";
-import { generateAccessToken } from "../utils/jwt.js";
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
 
 function isValidEmail(email: string) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+const accessCookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict" as const,
+    maxAge: 15 * 60 * 1000,
+    path: "/"
+};
+
+const refreshCookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict" as const,
+    maxAge: 28 * 24 * 60 * 60 * 1000,
+    path: "/"
+};
+
+function clearAuthCookies(res: Response) {
+    res.clearCookie("accessToken", { path: "/" });
+    res.clearCookie("refreshToken", { path: "/" });
 }
 
 export async function register(req: Request, res: Response, next: NextFunction) {
@@ -65,14 +87,10 @@ export async function login(req: Request, res: Response, next: NextFunction) {
         const { hash_pass: _, reset_token: _rt, reset_token_expires: _rte, ...safeUser } = user;
 
         const accessToken = generateAccessToken(safeUser.id);
+        const refreshToken = generateRefreshToken(safeUser.id);
 
-        res.cookie("accessToken", accessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
-            maxAge: 15 * 60 * 1000,
-            path: "/"
-        });
+        res.cookie("accessToken", accessToken, accessCookieOptions);
+        res.cookie("refreshToken", refreshToken, refreshCookieOptions);
 
         return res.json(new apiResponse(200, "logged in successfully", safeUser));
     } catch (err) {
@@ -92,9 +110,41 @@ export async function me(req: Request, res: Response, next: NextFunction) {
 
 export function logout(req: Request, res: Response, next: NextFunction) {
     try {
-        res.clearCookie("accessToken");
+        clearAuthCookies(res);
 
         return res.json(new apiResponse(200, "Logout successful"))
+    } catch (err) {
+        next(err)
+    }
+}
+
+export function refresh(req: Request, res: Response, next: NextFunction) {
+    try {
+        const token = req.cookies?.refreshToken;
+
+        if (!token) {
+            throw new apiError(401, "refresh token missing");
+        }
+
+        let payload: string | JwtPayload;
+
+        try {
+            payload = verifyRefreshToken(token);
+        } catch {
+            clearAuthCookies(res);
+            throw new apiError(401, "invalid or expired refresh token");
+        }
+
+        if (typeof payload === "string" || typeof payload.id !== "number") {
+            clearAuthCookies(res);
+            throw new apiError(401, "invalid refresh token");
+        }
+
+        const accessToken = generateAccessToken(payload.id);
+
+        res.cookie("accessToken", accessToken, accessCookieOptions);
+
+        return res.json(new apiResponse(200, "token refreshed successfully", { userId: payload.id }));
     } catch (err) {
         next(err)
     }
